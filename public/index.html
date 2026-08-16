@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kids Paper - AI Call Center & Feedback Hub</title>
+  <!-- Google Fonts: Space Grotesk & Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome 6.5 Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-kids-paper">
+  <!-- Glowing Background Orbs -->
+  <div class="glow-orb orb-1"></div>
+  <div class="glow-orb orb-2"></div>
+  <div class="glow-orb orb-3"></div>
+
+  <div class="main-wrapper">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon-box">
+          <i class="fa-solid fa-newspaper"></i>
+        </div>
+        <div class="brand-title">
+          <h2>Kids Paper</h2>
+          <span>AI Feedback Hub</span>
+        </div>
+      </div>
+
+      <div class="sidebar-status">
+        <div class="status-indicator-box">
+          <div class="live-dot"></div>
+          <div>
+            <small>TWILIO LINE</small>
+            <strong id="twilioLine">+1 (364) 223-9842</strong>
+          </div>
+        </div>
+
+        <div class="assistant-pill-box">
+          <i class="fa-solid fa-robot"></i>
+          <div>
+            <small>VAPI AGENT</small>
+            <strong id="assistantName">kids voice assitance</strong>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-menu">
+        <a href="#dialer" class="menu-item active"><i class="fa-solid fa-phone-arrow-up-right"></i> Outbound Dialer</a>
+        <a href="#feed" class="menu-item"><i class="fa-solid fa-comments"></i> Reader Feedback</a>
+        <a href="#analytics" class="menu-item"><i class="fa-solid fa-chart-pie"></i> Local Storage Data</a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="storage-badge">
+          <i class="fa-solid fa-database"></i> LocalStorage Active
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <div class="workspace">
+      <!-- Top Action Bar -->
+      <header class="workspace-header">
+        <div class="header-search">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="searchInput" placeholder="Search customer phone, parent name, or summary..." oninput="app.filterCalls()">
+        </div>
+
+        <div class="header-actions">
+          <button id="syncBtn" class="action-btn secondary" onclick="app.syncCalls()">
+            <i class="fa-solid fa-rotate"></i> Sync Summaries
+          </button>
+          <button class="action-btn primary" onclick="app.exportData()">
+            <i class="fa-solid fa-download"></i> Export Data
+          </button>
+          <button class="action-btn danger" onclick="app.clearStorage()" title="Clear Local Storage">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Body Container -->
+      <div class="workspace-body">
+        <!-- Outbound Softphone Dialer Card -->
+        <section id="dialer" class="dialer-section">
+          <div class="dialer-card">
+            <div class="card-badge"><i class="fa-solid fa-tower-cell"></i> Live Outbound Calling</div>
+            <h2>Call Kids Paper Reader / Parent</h2>
+            <p>Directly trigger a phone call via Twilio. Kids Voice Assistant will speak in Hindi, English, Gujarati, or Marathi and collect feedback into your browser storage.</p>
+
+            <div class="dialer-inputs">
+              <div class="input-wrapper">
+                <label><i class="fa-solid fa-phone"></i> Customer Phone Number</label>
+                <input type="text" id="phoneInput" placeholder="e.g. +919876543210 or +13642239842" required>
+              </div>
+
+              <div class="input-wrapper">
+                <label><i class="fa-solid fa-user"></i> Parent / Reader Name</label>
+                <input type="text" id="nameInput" placeholder="e.g. Tejas / Parent Name">
+              </div>
+
+              <button id="dialBtn" class="dial-submit-btn" onclick="app.makeCall()">
+                <i class="fa-solid fa-phone-volume"></i>
+                <span>Call Customer Now</span>
+              </button>
+            </div>
+
+            <div id="callNotice" class="call-status-notice hidden"></div>
+          </div>
+
+          <!-- Quick Metrics Bar -->
+          <div class="metrics-grid">
+            <div class="metric-card cyan">
+              <div class="metric-icon"><i class="fa-solid fa-phone-slash"></i></div>
+              <div class="metric-data">
+                <span class="metric-label">Total Calls</span>
+                <h3 id="kpiTotalCalls">0</h3>
+              </div>
+            </div>
+
+            <div class="metric-card amber">
+              <div class="metric-icon"><i class="fa-solid fa-newspaper"></i></div>
+              <div class="metric-data">
+                <span class="metric-label">Stored Summaries</span>
+                <h3 id="kpiSummaries">0</h3>
+              </div>
+            </div>
+
+            <div class="metric-card purple">
+              <div class="metric-icon"><i class="fa-solid fa-stopwatch"></i></div>
+              <div class="metric-data">
+                <span class="metric-label">Talk Time</span>
+                <h3 id="kpiTotalDuration">0m</h3>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Feedback Summaries List Feed -->
+        <section id="feed" class="feedback-feed-section">
+          <div class="feed-header">
+            <div class="feed-title">
+              <h3><i class="fa-solid fa-comments"></i> Reader Feedback Summaries</h3>
+              <span>Saved in LocalStorage & state</span>
+            </div>
+            <div class="feed-controls">
+              <select id="statusFilter" class="filter-select" onchange="app.filterCalls()">
+                <option value="all">All Feedback</option>
+                <option value="ended">Completed Calls</option>
+                <option value="in-progress">In Progress</option>
+                <option value="failed">Failed / Missed</option>
+              </select>
+              <span class="count-pill" id="resultsCount">0 Items</span>
+            </div>
+          </div>
+
+          <!-- Summaries Grid -->
+          <div id="summariesGrid" class="feedback-grid">
+            <div class="empty-feed">
+              <i class="fa-solid fa-newspaper"></i>
+              <h3>No Feedback Summaries Yet</h3>
+              <p>Enter a phone number in the Outbound Dialer above and click <strong>Call Customer Now</strong>!</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Modal Drawer -->
+  <div id="detailModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="user-detail-header">
+          <div class="avatar-lg"><i class="fa-solid fa-user-tie"></i></div>
+          <div>
+            <h3 id="modalCustomerNumber">+1 000-000-0000</h3>
+            <span id="modalCallDate" class="modal-date">Aug 16, 2026</span>
+          </div>
+        </div>
+        <button class="close-btn" onclick="app.closeModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="meta-row">
+          <span id="modalDuration" class="pill"><i class="fa-solid fa-stopwatch"></i> 0s</span>
+          <span id="modalEndedReason" class="pill"><i class="fa-solid fa-circle-check"></i> Completed</span>
+          <span id="modalCallId" class="pill font-mono">ID</span>
+        </div>
+
+        <div id="modalRecordingContainer" class="section-box hidden">
+          <h4><i class="fa-solid fa-circle-play"></i> Call Audio Recording</h4>
+          <audio id="modalAudioPlayer" controls style="width: 100%; margin-top: 8px;"></audio>
+        </div>
+
+        <div class="section-box highlight-box">
+          <h4><i class="fa-solid fa-newspaper"></i> AI Reader Feedback Summary</h4>
+          <p id="modalSummaryContent">No summary content available.</p>
+        </div>
+
+        <div class="section-box">
+          <h4><i class="fa-solid fa-pen-to-square"></i> Customer Custom Notes (LocalStorage)</h4>
+          <textarea id="modalNotesInput" rows="3" placeholder="Add custom notes for this parent/customer call..."></textarea>
+          <button class="action-btn primary btn-sm" style="margin-top: 8px;" onclick="app.saveNotes()">Save Notes</button>
+        </div>
+
+        <div class="section-box">
+          <h4><i class="fa-solid fa-comments"></i> Conversation Transcript</h4>
+          <div id="modalTranscriptTimeline" class="transcript-box"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="action-btn secondary" onclick="app.closeModal()">Close</button>
+        <button class="action-btn primary" onclick="app.copyCurrentSummary()">Copy Summary</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
