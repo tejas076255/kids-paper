@@ -10,7 +10,11 @@ from dotenv import load_dotenv
 import httpx
 from supabase import create_client, Client
 
-load_dotenv()
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(env_path):
+    load_dotenv(dotenv_path=env_path)
+else:
+    load_dotenv()
 
 app = FastAPI(title="Kids Paper Feedback API")
 
@@ -88,6 +92,63 @@ def extract_customer_number(v_call: dict) -> str:
         
     return "Customer Call"
 
+def extract_recording_url(v_call: dict) -> str:
+    if not isinstance(v_call, dict):
+        return ""
+    artifact = v_call.get("artifact") if isinstance(v_call.get("artifact"), dict) else {}
+    
+    for val in [
+        v_call.get("recordingUrl"),
+        artifact.get("recordingUrl"),
+        v_call.get("stereoRecordingUrl"),
+        artifact.get("stereoRecordingUrl"),
+        v_call.get("recording_url")
+    ]:
+        if val and isinstance(val, str) and val.strip().startswith("http"):
+            return val.strip()
+    return ""
+
+def extract_transcript(v_call: dict) -> str:
+    if not isinstance(v_call, dict):
+        return ""
+    artifact = v_call.get("artifact") if isinstance(v_call.get("artifact"), dict) else {}
+    
+    transcript = v_call.get("transcript") or artifact.get("transcript") or v_call.get("transcriptText") or ""
+    if isinstance(transcript, str):
+        return transcript.strip()
+    return ""
+
+def generate_or_extract_summary(v_call: dict, transcript: str, ended_reason: str) -> str:
+    artifact = v_call.get("artifact") if isinstance(v_call.get("artifact"), dict) else {}
+    analysis = v_call.get("analysis") if isinstance(v_call.get("analysis"), dict) else {}
+    
+    summary = v_call.get("summary") or analysis.get("summary") or artifact.get("summary") or ""
+    if isinstance(summary, str) and summary.strip() and summary.strip() != "Call completed with Kids Assistant.":
+        return summary.strip()
+        
+    # If transcript exists, generate a smart readable summary
+    if transcript and transcript.strip():
+        lines = [line.strip() for line in transcript.strip().split("\n") if line.strip()]
+        user_lines = [l for l in lines if l.lower().startswith("user:") or l.lower().startswith("caller:")]
+        if user_lines:
+            return "Reader Feedback: " + " | ".join(user_lines[:4])
+        else:
+            return "Conversation: " + " ".join(lines[:3])
+            
+    # If no transcript, explain based on endedReason or status
+    if ended_reason:
+        reason_lower = ended_reason.lower()
+        if "busy" in reason_lower:
+            return "Customer line busy / Did not answer"
+        elif "silence-timed-out" in reason_lower:
+            return "Call connected but silence timed out"
+        elif "error" in reason_lower:
+            return f"Call ended ({ended_reason})"
+        elif "customer-ended-call" in reason_lower:
+            return "Customer disconnected before speaking"
+            
+    return "Call completed"
+
 def upsert_call_to_supabase(call_data: dict):
     if not supabase:
         return None
@@ -96,23 +157,41 @@ def upsert_call_to_supabase(call_data: dict):
     if num == "Customer Call":
         num = call_data.get("customer_number") or call_data.get("customerNumber") or num
 
+    recording_url = extract_recording_url(call_data)
+    transcript = extract_transcript(call_data)
+    ended_reason = call_data.get("endedReason") or call_data.get("ended_reason") or "completed"
+    summary = generate_or_extract_summary(call_data, transcript, ended_reason)
+
+    started_at = call_data.get("startedAt")
+    ended_at = call_data.get("endedAt")
+    duration_seconds = call_data.get("durationSeconds") or call_data.get("duration_seconds")
+    if not duration_seconds and started_at and ended_at:
+        try:
+            s_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            e_dt = datetime.fromisoformat(ended_at.replace("Z", "+00:00"))
+            duration_seconds = max(0, round((e_dt - s_dt).total_seconds()))
+        except Exception:
+            duration_seconds = 0
+    elif not duration_seconds:
+        duration_seconds = 0
+
     record = {
         "id": call_data.get("id"),
         "created_at": call_data.get("createdAt") or call_data.get("created_at") or datetime.utcnow().isoformat(),
         "customer_number": num,
-        "duration_seconds": call_data.get("durationSeconds") or call_data.get("duration_seconds") or 0,
-        "summary": call_data.get("summary") or "No summary generated",
-        "transcript": call_data.get("transcript") or "",
-        "recording_url": call_data.get("recordingUrl") or call_data.get("recording_url") or "",
+        "duration_seconds": duration_seconds,
+        "summary": summary,
+        "transcript": transcript,
+        "recording_url": recording_url,
         "status": call_data.get("status") or "ended",
-        "ended_reason": call_data.get("endedReason") or call_data.get("ended_reason") or "completed",
+        "ended_reason": ended_reason,
         "notes": call_data.get("notes"),
         "updated_at": datetime.utcnow().isoformat()
     }
 
     try:
         data, count = supabase.table("calls").upsert(record).execute()
-        print(f"[Supabase] Call {record['id']} ({record['customer_number']}) saved/updated successfully.")
+        print(f"[Supabase] Call {record['id']} ({record['customer_number']}) synced: rec={bool(recording_url)}, sum={len(summary)} chars")
         return data
     except Exception as e:
         print(f"[Supabase Error]: {e}")
@@ -145,7 +224,7 @@ async def get_calls(background_tasks: BackgroundTasks):
     if not VAPI_API_KEY:
         raise HTTPException(status_code=400, detail="VAPI_API_KEY is not configured in .env")
         
-    url = f"https://api.vapi.ai/call?assistantId={VAPI_ASSISTANT_ID}" if VAPI_ASSISTANT_ID else "https://api.vapi.ai/call"
+    url = f"https://api.vapi.ai/call?assistantId={VAPI_ASSISTANT_ID}&limit=100" if VAPI_ASSISTANT_ID else "https://api.vapi.ai/call?limit=100"
     
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers={
@@ -160,19 +239,25 @@ async def get_calls(background_tasks: BackgroundTasks):
         
         if isinstance(calls, list) and supabase:
             for v_call in calls:
-                summary = v_call.get("summary") or v_call.get("analysis", {}).get("summary", "Call completed with Kids Assistant.")
+                rec_url = extract_recording_url(v_call)
+                transcript = extract_transcript(v_call)
+                ended_reason = v_call.get("endedReason") or "completed"
+                summary = generate_or_extract_summary(v_call, transcript, ended_reason)
+                
+                v_call["recordingUrl"] = rec_url
+                v_call["transcript"] = transcript
+                v_call["summary"] = summary
                 
                 duration_seconds = v_call.get("durationSeconds")
-                if not duration_seconds:
-                    if v_call.get("endedAt") and v_call.get("startedAt"):
+                if not duration_seconds and v_call.get("endedAt") and v_call.get("startedAt"):
+                    try:
                         started = datetime.fromisoformat(v_call["startedAt"].replace("Z", "+00:00"))
                         ended = datetime.fromisoformat(v_call["endedAt"].replace("Z", "+00:00"))
-                        duration_seconds = round((ended - started).total_seconds())
-                    else:
+                        duration_seconds = max(0, round((ended - started).total_seconds()))
+                    except Exception:
                         duration_seconds = 0
+                v_call["durationSeconds"] = duration_seconds or 0
                 
-                v_call["summary"] = summary
-                v_call["durationSeconds"] = duration_seconds
                 background_tasks.add_task(upsert_call_to_supabase, v_call)
                 
         return calls
@@ -188,6 +273,30 @@ async def get_supabase_calls():
     except Exception as e:
         print(f"[Supabase Fetch Error]: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/supabase/sync-all")
+async def sync_all_vapi_to_supabase():
+    """Manually trigger a full backfill/sync of all Vapi calls into Supabase."""
+    if not VAPI_API_KEY:
+        raise HTTPException(status_code=400, detail="VAPI_API_KEY missing")
+    if not supabase:
+        raise HTTPException(status_code=400, detail="Supabase is not configured")
+
+    url = "https://api.vapi.ai/call?limit=100"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers={"Authorization": f"Bearer {VAPI_API_KEY}"})
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        vapi_calls = response.json()
+
+    synced_count = 0
+    if isinstance(vapi_calls, list):
+        for c in vapi_calls:
+            res = upsert_call_to_supabase(c)
+            if res is not None:
+                synced_count += 1
+
+    return {"success": True, "syncedCount": synced_count, "totalFetched": len(vapi_calls)}
 
 @app.post("/api/calls/save-notes")
 async def save_notes(req: SaveNotesRequest):
@@ -268,16 +377,23 @@ async def vapi_webhook(request: Request, background_tasks: BackgroundTasks):
     
     if message.get("type") == "end-of-call-report":
         call_data = message.get("call", {})
+        artifact = message.get("artifact") or call_data.get("artifact") or {}
+        
+        rec_url = extract_recording_url(message) or extract_recording_url(call_data)
+        transcript = extract_transcript(message) or extract_transcript(call_data)
+        ended_reason = message.get("endedReason") or call_data.get("endedReason") or "completed"
+        summary = generate_or_extract_summary(message, transcript, ended_reason)
+        
         report = {
             "id": call_data.get("id") or f"call_{int(datetime.utcnow().timestamp()*1000)}",
             "createdAt": call_data.get("createdAt") or datetime.utcnow().isoformat(),
-            "customerNumber": call_data.get("customer", {}).get("number") or call_data.get("phoneNumber") or "Unknown Customer",
+            "customerNumber": extract_customer_number(call_data),
             "durationSeconds": message.get("durationSeconds") or call_data.get("durationSeconds") or 0,
-            "summary": message.get("summary") or call_data.get("summary") or "No summary generated",
-            "transcript": message.get("transcript") or call_data.get("transcript") or "",
-            "recordingUrl": message.get("recordingUrl") or call_data.get("recordingUrl") or "",
+            "summary": summary,
+            "transcript": transcript,
+            "recordingUrl": rec_url,
             "status": call_data.get("status") or "ended",
-            "endedReason": message.get("endedReason") or call_data.get("endedReason") or "completed",
+            "endedReason": ended_reason,
             "analysis": message.get("analysis", {})
         }
         
@@ -291,3 +407,7 @@ async def vapi_webhook(request: Request, background_tasks: BackgroundTasks):
 @app.get("/api/webhooks/latest")
 async def get_latest_webhooks():
     return webhook_summaries
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False)

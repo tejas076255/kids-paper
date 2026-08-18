@@ -24,6 +24,7 @@ function App() {
   } = useCalls()
 
   const [selectedCall, setSelectedCall] = useState(null)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const exportData = () => {
     if (calls.length === 0) {
@@ -47,7 +48,11 @@ function App() {
       <div className="glow-orb orb-3"></div>
 
       <div className="main-wrapper">
-        <Sidebar config={config} />
+        <Sidebar 
+          config={config} 
+          isOpen={isSidebarOpen} 
+          onClose={() => setIsSidebarOpen(false)} 
+        />
 
         <div className="workspace">
           <Header 
@@ -56,6 +61,7 @@ function App() {
             syncCalls={syncCalls}
             exportData={exportData}
             clearStorage={clearStorage}
+            onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
           />
 
           <div className="workspace-body">
